@@ -1,0 +1,5 @@
+Tool,Status,Function Count,Call Relationship Count,Average In-Degree,Average Out-Degree,Max In-Degree,Max Out-Degree,Graph Density,Strong Components
+Radare2,Success,1600,5545,3.466,3.466,323,94,0.002167,1567
+Ghidra,Success,34,59,1.735,1.735,7,33,0.052585,34
+Angr_Fast,Success,86,157,1.826,1.826,8,33,0.021477,86
+Angr_Emul,Success,94,191,2.032,2.032,13,31,0.021849,90

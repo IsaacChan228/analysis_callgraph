@@ -1,0 +1,5 @@
+Tool,Radare2,Ghidra,Angr_Fast,Angr_Emul
+Radare2,1.0,0.0118,0.0262,0.0279
+Ghidra,0.0118,1.0,0.3953,0.3474
+Angr_Fast,0.0262,0.3953,1.0,0.875
+Angr_Emul,0.0279,0.3474,0.875,1.0

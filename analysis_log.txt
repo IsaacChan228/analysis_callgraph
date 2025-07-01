@@ -1,0 +1,110 @@
+Starting analysis of all call graphs...
+Standardizing Radare2 call graph...
+Radare2: 1600 functions, 5545 call relationships
+Standardizing Ghidra call graph...
+Ghidra: 34 functions, 59 call relationships
+Standardizing Angr_Fast call graph...
+Angr_Fast: 86 functions, 157 call relationships
+Standardizing Angr_Emul call graph...
+Angr_Emul: 94 functions, 191 call relationships
+✅ Successfully analyzed 4 tools: Radare2, Ghidra, Angr_Fast, Angr_Emul
+================================================================================
+Multi-Tool Call Graph Comparison Analysis Report
+================================================================================
+
+1. Basic Statistics
+--------------------------------------------------
+Tool            Functions       Calls           Graph Density   Status    
+---------------------------------------------------------------------------
+Radare2         1600            5545            0.0022          ✓ Success 
+Ghidra          34              59              0.0526          ✓ Success 
+Angr_Fast       86              157             0.0215          ✓ Success 
+Angr_Emul       94              191             0.0218          ✓ Success 
+
+2. Function Discovery Analysis
+--------------------------------------------------
+Total unique functions: 1649
+Functions found by all tools: 18
+
+3. Pairwise Comparison Analysis (Successful Tools Only)
+--------------------------------------------------
+Radare2 vs Ghidra:
+  Common functions: 19
+  Jaccard similarity: 0.012
+Radare2 vs Angr_Fast:
+  Common functions: 43
+  Jaccard similarity: 0.026
+Radare2 vs Angr_Emul:
+  Common functions: 46
+  Jaccard similarity: 0.028
+Ghidra vs Angr_Fast:
+  Common functions: 34
+  Jaccard similarity: 0.395
+Ghidra vs Angr_Emul:
+  Common functions: 33
+  Jaccard similarity: 0.347
+Angr_Fast vs Angr_Emul:
+  Common functions: 84
+  Jaccard similarity: 0.875
+
+4. Call Relationship Analysis
+--------------------------------------------------
+Total unique call relationships: 5689
+Call relationships found by all tools: 23
+
+5. Tool Characteristic Analysis (Successful Tools Only)
+--------------------------------------------------
+
+Radare2 unique functions (1553 total):
+  - 0002e6e0
+  - 0002e6f0
+  - 0002e700
+  - 0x108
+  - 0x110
+  - 0x118
+  - 0x120
+  - 0x128
+  - 0x138
+  - 0x140
+  ... and 1543 more
+
+Ghidra unique functions (0 total):
+  (No unique functions)
+
+Angr_Fast unique functions (1 total):
+  - UnresolvableCallTarget
+
+Angr_Emul unique functions (6 total):
+  - calloc
+  - fcntl
+  - fileno
+  - sprintf_chk
+  - vasprintf_chk
+  - vsnprintf_chk
+
+Generating visualization charts...
+Function discovery comparison chart saved as result/function_discovery_comparison.png
+Call relationship comparison chart saved as result/call_relationship_comparison.png
+Graph density comparison chart saved as result/graph_density_comparison.png
+Similarity heatmap saved as result/similarity_heatmap.png
+High-level/low-level function analysis data exported to:
+  - result/function_level_analysis_statistics.csv (statistics summary)
+  - result/function_level_analysis_high_level_functions.csv (high-level function list)
+  - result/function_level_analysis_low_level_functions.csv (low-level function list)
+  - result/function_level_analysis_high_level_calls.csv (high-level call relationships)
+
+Exporting comparison results to CSV files...
+Comparison results exported to:
+  - result/multi_callgraph_comparison_statistics.csv
+  - result/multi_callgraph_comparison_similarity.csv
+  - result/multi_callgraph_comparison_functions.csv
+
+✅ Analysis complete!
+📁 Output files:
+  - analysis_log.txt (complete log)
+  - result/function_discovery_comparison.png (function discovery comparison)
+  - result/call_relationship_comparison.png (call relationship comparison)
+  - result/graph_density_comparison.png (graph density comparison)
+  - result/similarity_heatmap.png (similarity heatmap)
+  - result/multi_callgraph_comparison_*.csv (basic data)
+  - result/function_level_analysis_*.csv (high-level/low-level data)

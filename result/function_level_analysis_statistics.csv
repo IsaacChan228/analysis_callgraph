@@ -1,0 +1,5 @@
+Tool,Total Functions,High-Level Functions,Low-Level Functions,High-Level Function Ratio (%),High-Level Calls,Low-Level Calls,High-Level Graph Density,Low-Level Graph Density,High-Level Strong Components,Low-Level Strong Components
+Radare2,1600,938,662,58.63,2527,843,0.002875,0.001926,911,661
+Ghidra,34,31,3,91.18,52,0,0.055914,0.0,31,3
+Angr_Fast,86,80,6,93.02,136,1,0.021519,0.033333,80,6
+Angr_Emul,94,89,5,94.68,171,1,0.021834,0.05,85,5

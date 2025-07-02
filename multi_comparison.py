@@ -26,8 +26,16 @@ class Logger:
 class CallGraphNormalizer:
     """Call graph standardization processor"""
     
+    # Tools that are allowed to fail without terminating the program
+    OPTIONAL_TOOLS = {'angr_emul', 'gcc'}
+    
     def normalize_function_name(self, name: str) -> str:
         """Standardize function names"""
+        if not name:
+            return None
+        
+        # Strip whitespace and normalize
+        name = name.strip()
         if not name:
             return None
         
@@ -50,12 +58,24 @@ class CallGraphNormalizer:
         # Remove leading underscores
         name = re.sub(r'^_+', '', name)
         
+        # Additional normalization to prevent duplicates
+        name = name.strip()  # Remove any remaining whitespace
+        
         # Handle special cases
         if name.startswith('case.') or name.startswith('switch.'):
             return None
         
         # If name becomes empty or contains only digits, return None
         if not name or name.isdigit():
+            return None
+        
+        # Convert to lowercase for case-insensitive comparison to reduce duplicates
+        # but preserve original case for readability
+        normalized_lower = name.lower()
+        
+        # Filter out common generic names that might cause duplicates
+        generic_names = {'unknown', 'unnamed', 'noname', 'func', 'function', 'sub'}
+        if normalized_lower in generic_names:
             return None
             
         return name
@@ -69,15 +89,15 @@ class CallGraphNormalizer:
             with open(dot_file, 'r', encoding='utf-8') as f:
                 content = f.read()
         except FileNotFoundError:
-            if tool_name.lower() == 'angr_emul':
-                print(f"⚠️  Warning: {tool_name} file not found ({dot_file}) - This is expected as Angr_Emul may fail")
+            if tool_name.lower() in self.OPTIONAL_TOOLS:
+                print(f"⚠️  Warning: {tool_name} file not found ({dot_file}) - This is expected as {tool_name} may fail")
                 return functions, calls
             else:
                 print(f"❌ Fatal Error: Required {tool_name} file not found ({dot_file})")
                 print(f"Program will terminate. Please ensure all required graph files exist.")
                 raise FileNotFoundError(f"Required graph file missing: {dot_file}")
         except Exception as e:
-            if tool_name.lower() == 'angr_emul':
+            if tool_name.lower() in self.OPTIONAL_TOOLS:
                 print(f"⚠️  Warning: Cannot read {tool_name} file ({dot_file}): {e} - Will skip this tool")
                 return functions, calls
             else:
@@ -87,7 +107,7 @@ class CallGraphNormalizer:
         
         # Check if file content is empty or invalid
         if not content.strip():
-            if tool_name.lower() == 'angr_emul':
+            if tool_name.lower() in self.OPTIONAL_TOOLS:
                 print(f"⚠️  Warning: {tool_name} file is empty or has no content - This is acceptable")
                 return functions, calls
             else:
@@ -102,10 +122,14 @@ class CallGraphNormalizer:
         
         # Check if data was successfully extracted
         if len(functions) == 0 and len(calls) == 0:
-            if tool_name.lower() == 'angr_emul':
+            if tool_name.lower() in self.OPTIONAL_TOOLS:
                 print(f"⚠️  Warning: {tool_name} analysis failed or found no functions and call relationships - Will continue with other tools")
                 print(f"    This may be due to:")
-                print(f"    - Angr emulation mode execution failure")
+                if tool_name.lower() == 'angr_emul':
+                    print(f"    - Angr emulation mode execution failure")
+                elif tool_name.lower() == 'gcc':
+                    print(f"    - GCC call graph generation failure")
+                    print(f"    - Missing compilation flags or debug information")
                 print(f"    - Incorrect file format")
                 print(f"    - Binary file too complex")
             else:
@@ -116,6 +140,9 @@ class CallGraphNormalizer:
                 print(f"    - Binary file too complex or corrupted")
                 print(f"Program will terminate.")
                 raise ValueError(f"Required tool {tool_name} found no data")
+        
+        # Explicitly deduplicate and clean the data
+        functions, calls = self._deduplicate_data(functions, calls, tool_name)
         
         return functions, calls
     
@@ -213,6 +240,39 @@ class CallGraphNormalizer:
             label = match.group(1)
             return label.split('\\n')[0] if '\\n' in label else label
         return identifier
+    
+    def _deduplicate_data(self, functions: Set[str], calls: Set[Tuple[str, str]], tool_name: str) -> Tuple[Set[str], Set[Tuple[str, str]]]:
+        """Explicitly deduplicate functions and calls with logging"""
+        original_func_count = len(functions)
+        original_call_count = len(calls)
+        
+        # Convert to set to ensure deduplication (even though they should already be sets)
+        deduplicated_functions = set(functions)
+        deduplicated_calls = set(calls)
+        
+        # Remove any self-calls (function calling itself) as they might be artifacts
+        filtered_calls = set()
+        self_call_count = 0
+        for caller, callee in deduplicated_calls:
+            if caller == callee:
+                self_call_count += 1
+            else:
+                filtered_calls.add((caller, callee))
+        
+        final_func_count = len(deduplicated_functions)
+        final_call_count = len(filtered_calls)
+        
+        # Log deduplication results if any duplicates were found
+        if original_func_count != final_func_count:
+            print(f"  🔧 {tool_name}: Removed {original_func_count - final_func_count} duplicate functions")
+        
+        if original_call_count != final_call_count + self_call_count:
+            print(f"  🔧 {tool_name}: Removed {original_call_count - final_call_count - self_call_count} duplicate calls")
+        
+        if self_call_count > 0:
+            print(f"  🔧 {tool_name}: Removed {self_call_count} self-calls")
+        
+        return deduplicated_functions, filtered_calls
 
 class MultiCallGraphComparator:
     """Multi call graph comparison analyzer"""
@@ -223,7 +283,8 @@ class MultiCallGraphComparator:
             'Radare2': 'graph/r2.dot',
             'Ghidra': 'graph/ghidra.gf',
             'Angr_Fast': 'graph/angr_fast.dot', 
-            'Angr_Emul': 'graph/angr_emul.dot'
+            'Angr_Emul': 'graph/angr_emul.dot',
+            'GCC': 'graph/gcc.dot'
         }
         
     def compare_all_call_graphs(self) -> Dict:
@@ -244,8 +305,8 @@ class MultiCallGraphComparator:
                 }
                 print(f"{tool_name}: {len(functions)} functions, {len(calls)} call relationships")
             except (FileNotFoundError, ValueError, Exception) as e:
-                if tool_name.lower() == 'angr_emul':
-                    # Angr_Emul failure is acceptable, create empty data
+                if tool_name.lower() in self.normalizer.OPTIONAL_TOOLS:
+                    # Optional tool failure is acceptable, create empty data
                     print(f"⚠️  {tool_name} skipped: {str(e)}")
                     tool_data[tool_name] = {
                         'functions': set(),
@@ -254,7 +315,7 @@ class MultiCallGraphComparator:
                     }
                     print(f"{tool_name}: 0 functions, 0 call relationships (skipped)")
                 else:
-                    # Other tool failures terminate the program
+                    # Required tool failures terminate the program
                     print(f"💥 Program terminated: {tool_name} is a required tool but analysis failed")
                     raise e
         
@@ -272,21 +333,54 @@ class MultiCallGraphComparator:
         
         print(f"✅ Successfully analyzed {len(successful_tools)} tools: {', '.join(successful_tools)}")
         
-        # Calculate union and intersection of all tools
+        # Calculate union and intersection of all tools with explicit deduplication
         all_functions = set()
         all_calls = set()
         
-        for data in tool_data.values():
+        print(f"\n🔍 Aggregating data from all tools:")
+        for tool_name, data in tool_data.items():
+            before_func_count = len(all_functions)
+            before_call_count = len(all_calls)
+            
             all_functions |= data['functions']
             all_calls |= data['calls']
+            
+            func_added = len(all_functions) - before_func_count
+            call_added = len(all_calls) - before_call_count
+            
+            if func_added > 0 or call_added > 0:
+                print(f"  + {tool_name}: Added {func_added} unique functions, {call_added} unique calls")
         
-        # Calculate intersection
+        print(f"📊 Total unique functions: {len(all_functions)}")
+        print(f"📊 Total unique calls: {len(all_calls)}")
+        
+        # Calculate intersection with explicit logging
         common_functions = all_functions.copy()
         common_calls = all_calls.copy()
         
-        for data in tool_data.values():
+        print(f"\n🔍 Finding common elements across tools:")
+        for tool_name, data in tool_data.items():
+            before_common_func = len(common_functions)
+            before_common_call = len(common_calls)
+            
             common_functions &= data['functions']
             common_calls &= data['calls']
+            
+            func_removed = before_common_func - len(common_functions)
+            call_removed = before_common_call - len(common_calls)
+            
+            if func_removed > 0 or call_removed > 0:
+                print(f"  - {tool_name}: Filtered out {func_removed} functions, {call_removed} calls not in common")
+        
+        print(f"📊 Common functions: {len(common_functions)}")
+        print(f"📊 Common calls: {len(common_calls)}")
+        
+        # Final validation - ensure no duplicates in the final results
+        print(f"\n✅ Final validation:")
+        print(f"  - All functions are unique: {len(all_functions) == len(set(all_functions))}")
+        print(f"  - All calls are unique: {len(all_calls) == len(set(all_calls))}")
+        print(f"  - Common functions are unique: {len(common_functions) == len(set(common_functions))}")
+        print(f"  - Common calls are unique: {len(common_calls) == len(set(common_calls))}")
         
         return {
             'tool_data': tool_data,
@@ -521,17 +615,26 @@ class MultiCallGraphComparator:
             low_level_calls = self._filter_calls_by_function_level(
                 data['calls'], classification['high_level'], classification['low_level'], 'low')
             
+            # Calculate mixed-level calls
+            mixed_level_calls = set()
+            for caller, callee in data['calls']:
+                caller_is_high = caller in classification['high_level']
+                callee_is_high = callee in classification['high_level']
+                if (caller_is_high and not callee_is_high) or (not caller_is_high and callee_is_high):
+                    mixed_level_calls.add((caller, callee))
+            
             tool_level_data[tool_name] = {
                 'high_level_funcs': classification['high_level'],
                 'low_level_funcs': classification['low_level'],
                 'high_level_calls': high_level_calls,
                 'low_level_calls': low_level_calls,
+                'mixed_level_calls': mixed_level_calls,
                 'high_level_graph': self._create_graph(classification['high_level'], high_level_calls),
                 'low_level_graph': self._create_graph(classification['low_level'], low_level_calls)
             }
         
         tools = list(tool_data.keys())
-        colors = ['#ff7f0e', '#9467bd', '#2ca02c', '#d62728']
+        colors = ['#ff7f0e', '#9467bd', '#2ca02c', '#d62728', '#17becf']
         
         # Use gray color for failed tools
         bar_colors = []
@@ -548,7 +651,7 @@ class MultiCallGraphComparator:
         self._create_similarity_heatmap(tool_data, failed_tools)
         
         # Export high-level and low-level data to CSV
-        self._export_level_data_to_csv(tool_level_data, "function_level_analysis")
+        self._export_level_data_to_csv(tool_data, tool_level_data, "function_level_analysis")
     
     def _create_function_discovery_chart(self, tool_data, tool_level_data, tools, bar_colors, failed_tools):
         """Create function discovery comparison chart"""
@@ -575,7 +678,7 @@ class MultiCallGraphComparator:
     
     def _create_call_relationship_chart(self, tool_data, tool_level_data, tools, bar_colors, failed_tools):
         """Create call relationship comparison chart"""
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(18, 12))
         
         # Total call relationship comparison
         self._create_bar_chart(ax1, tools,
@@ -591,6 +694,11 @@ class MultiCallGraphComparator:
         self._create_bar_chart(ax3, tools,
                               [len(tool_level_data[t]['low_level_calls']) for t in tools],
                               bar_colors, failed_tools, 'Low-Level Call Relationships', 'Number of Calls')
+        
+        # Mixed-level call relationship comparison
+        self._create_bar_chart(ax4, tools,
+                              [len(tool_level_data[t]['mixed_level_calls']) for t in tools],
+                              bar_colors, failed_tools, 'Mixed-Level Call Relationships', 'Number of Calls')
         
         plt.tight_layout()
         plt.savefig('result/call_relationship_comparison.png', dpi=300, bbox_inches='tight')
@@ -619,7 +727,7 @@ class MultiCallGraphComparator:
         plt.savefig('result/graph_density_comparison.png', dpi=300, bbox_inches='tight')
         print("Graph density comparison chart saved as result/graph_density_comparison.png")
     
-    def _export_level_data_to_csv(self, tool_level_data, output_prefix: str):
+    def _export_level_data_to_csv(self, tool_data, tool_level_data, output_prefix: str):
         """Export high-level and low-level function data to CSV files"""
         tools = list(tool_level_data.keys())
         
@@ -647,62 +755,57 @@ class MultiCallGraphComparator:
         level_stats_df = pd.DataFrame(level_stats_data)
         level_stats_df.to_csv(f"result/{output_prefix}_statistics.csv", index=False, encoding='utf-8')
         
-        # 2. Export high-level function list
-        all_high_level_funcs = set()
-        for data in tool_level_data.values():
-            all_high_level_funcs |= data['high_level_funcs']
-        
-        high_level_data = []
-        for func in sorted(all_high_level_funcs):
-            row = {'Function Name': func, 'Category': 'High-Level'}
-            for tool in tools:
-                row[tool] = '✓' if func in tool_level_data[tool]['high_level_funcs'] else '✗'
-            high_level_data.append(row)
-        
-        high_level_df = pd.DataFrame(high_level_data)
-        high_level_df.to_csv(f"result/{output_prefix}_high_level_functions.csv", index=False, encoding='utf-8')
-        
-        # 3. Export low-level function list (limit count to avoid oversized files)
-        all_low_level_funcs = set()
-        for data in tool_level_data.values():
-            all_low_level_funcs |= data['low_level_funcs']
-        
-        # If too many low-level functions, only export first 1000
-        sorted_low_funcs = sorted(all_low_level_funcs)
-        if len(sorted_low_funcs) > 1000:
-            sorted_low_funcs = sorted_low_funcs[:1000]
-            print(f"⚠️  Too many low-level functions ({len(all_low_level_funcs)}), only exporting first 1000 to CSV")
-        
-        low_level_data = []
-        for func in sorted_low_funcs:
-            row = {'Function Name': func, 'Category': 'Low-Level'}
-            for tool in tools:
-                row[tool] = '✓' if func in tool_level_data[tool]['low_level_funcs'] else '✗'
-            low_level_data.append(row)
-        
-        low_level_df = pd.DataFrame(low_level_data)
-        low_level_df.to_csv(f"result/{output_prefix}_low_level_functions.csv", index=False, encoding='utf-8')
-        
-        # 4. Export high-level function call relationships
+        # 2. Export call relationships with level classification
         all_high_level_calls = set()
+        all_low_level_calls = set()
+        
         for data in tool_level_data.values():
             all_high_level_calls |= data['high_level_calls']
+            all_low_level_calls |= data['low_level_calls']
         
-        high_call_data = []
+        # Combine all calls and classify them
+        all_calls_with_level = []
+        
+        # Add high-level calls
         for caller, callee in sorted(all_high_level_calls):
             row = {'Caller': caller, 'Callee': callee, 'Call Type': 'High-High'}
             for tool in tools:
-                row[tool] = '✓' if (caller, callee) in tool_level_data[tool]['high_level_calls'] else '✗'
-            high_call_data.append(row)
+                row[tool] = 'Y' if (caller, callee) in tool_level_data[tool]['high_level_calls'] else 'N'
+            all_calls_with_level.append(row)
         
-        high_call_df = pd.DataFrame(high_call_data)
-        high_call_df.to_csv(f"result/{output_prefix}_high_level_calls.csv", index=False, encoding='utf-8')
+        # Add low-level calls
+        for caller, callee in sorted(all_low_level_calls):
+            row = {'Caller': caller, 'Callee': callee, 'Call Type': 'Low-Low'}
+            for tool in tools:
+                row[tool] = 'Y' if (caller, callee) in tool_level_data[tool]['low_level_calls'] else 'N'
+            all_calls_with_level.append(row)
+        
+        # Check for mixed-level calls (high->low or low->high)
+        all_mixed_calls = set()
+        for tool_name, level_data in tool_level_data.items():
+            original_calls = tool_data[tool_name]['calls']  # Get original calls from tool_data
+            for caller, callee in original_calls:
+                # Check if this is a mixed-level call
+                caller_is_high = caller in level_data['high_level_funcs']
+                callee_is_high = callee in level_data['high_level_funcs']
+                
+                if (caller_is_high and not callee_is_high) or (not caller_is_high and callee_is_high):
+                    all_mixed_calls.add((caller, callee, 'Mixed-Level'))
+        
+        # Add mixed-level calls
+        for caller, callee, call_type in sorted(all_mixed_calls):
+            row = {'Caller': caller, 'Callee': callee, 'Call Type': call_type}
+            for tool in tools:
+                # Check if this call exists in the tool's original call data
+                row[tool] = 'Y' if (caller, callee) in tool_data[tool]['calls'] else 'N'
+            all_calls_with_level.append(row)
+        
+        calls_df = pd.DataFrame(all_calls_with_level)
+        calls_df.to_csv(f"result/{output_prefix}_calls.csv", index=False, encoding='utf-8')
         
         print(f"High-level/low-level function analysis data exported to:")
         print(f"  - result/{output_prefix}_statistics.csv (statistics summary)")
-        print(f"  - result/{output_prefix}_high_level_functions.csv (high-level function list)")
-        print(f"  - result/{output_prefix}_low_level_functions.csv (low-level function list)")
-        print(f"  - result/{output_prefix}_high_level_calls.csv (high-level call relationships)")
+        print(f"  - result/{output_prefix}_calls.csv (call relationships with level classification)")
     
     def _create_bar_chart(self, ax, tools, values, colors, failed_tools, title, ylabel, format_values=False):
         """Helper function to create bar charts"""
@@ -842,17 +945,39 @@ class MultiCallGraphComparator:
         similarity_df = pd.DataFrame(similarity_data)
         similarity_df.to_csv(f"result/{output_prefix}_similarity.csv", index=False, encoding='utf-8')
         
-        # 3. Export function comparison
+        # 3. Export function comparison with level classification
         all_functions = sorted(comparison['all_functions'])
+        
+        # Create combined classification for all functions
+        all_high_level_funcs = set()
+        all_low_level_funcs = set()
+        
+        # Collect all function classifications from all tools
+        for tool_name, data in tool_data.items():
+            if tool_name not in failed_tools:
+                classification = self._classify_functions(data['functions'])
+                all_high_level_funcs |= classification['high_level']
+                all_low_level_funcs |= classification['low_level']
+        
         func_data = []
         
         for func in all_functions:
-            row = {'Function Name': func}
+            # Determine function level - if classified as high-level by any tool, mark as high-level
+            if func in all_high_level_funcs:
+                func_level = 'High-Level'
+            elif func in all_low_level_funcs:
+                func_level = 'Low-Level'
+            else:
+                # Fallback classification for unclassified functions
+                classification = self._classify_functions({func})
+                func_level = 'High-Level' if func in classification['high_level'] else 'Low-Level'
+            
+            row = {'Function Name': func, 'Level': func_level}
             for tool in tools:
                 if tool in failed_tools:
                     row[tool] = 'N/A'  # Mark failed tools as N/A
                 else:
-                    row[tool] = '✓' if func in tool_data[tool]['functions'] else '✗'
+                    row[tool] = 'Y' if func in tool_data[tool]['functions'] else 'N'
             func_data.append(row)
         
         func_df = pd.DataFrame(func_data)
@@ -865,5 +990,183 @@ class MultiCallGraphComparator:
         
         if failed_tools:
             print(f"⚠️  Note: {', '.join(failed_tools)} tool analysis failed, marked as 'N/A' in CSV files")
+    
+    def _perform_gcc_coverage_analysis(self, comparison: Dict) -> Dict:
+        """Perform GCC-based coverage analysis - calculate percentage of GCC functions/calls found in other tools"""
+        tool_data = comparison['tool_data']
+        
+        # Check if GCC data exists and is valid
+        if 'GCC' not in tool_data:
+            print("⚠️  Warning: GCC data not found, skipping coverage analysis")
+            return None
+            
+        gcc_data = tool_data['GCC']
+        if len(gcc_data['functions']) == 0 and len(gcc_data['calls']) == 0:
+            print("⚠️  Warning: GCC data is empty, skipping coverage analysis")
+            return None
+        
+        gcc_functions = gcc_data['functions']
+        gcc_calls = gcc_data['calls']
+        
+        print(f"\n📊 GCC Coverage Analysis:")
+        print(f"Using GCC as reference standard:")
+        print(f"  - GCC functions: {len(gcc_functions)}")
+        print(f"  - GCC calls: {len(gcc_calls)}")
+        
+        coverage_results = {}
+        
+        # Analyze each tool's coverage of GCC functions and calls
+        for tool_name, data in tool_data.items():
+            if tool_name == 'GCC':
+                continue  # Skip GCC itself
+                
+            tool_functions = data['functions']
+            tool_calls = data['calls']
+            
+            # Calculate function coverage
+            if len(gcc_functions) > 0:
+                common_functions = gcc_functions & tool_functions
+                function_coverage = len(common_functions) / len(gcc_functions) * 100
+            else:
+                function_coverage = 0
+                common_functions = set()
+            
+            # Calculate call coverage
+            if len(gcc_calls) > 0:
+                common_calls = gcc_calls & tool_calls
+                call_coverage = len(common_calls) / len(gcc_calls) * 100
+            else:
+                call_coverage = 0
+                common_calls = set()
+            
+            coverage_results[tool_name] = {
+                'function_coverage': function_coverage,
+                'call_coverage': call_coverage,
+                'common_functions': common_functions,
+                'common_calls': common_calls,
+                'gcc_functions_found': len(common_functions),
+                'gcc_calls_found': len(common_calls),
+                'tool_total_functions': len(tool_functions),
+                'tool_total_calls': len(tool_calls)
+            }
+            
+            print(f"  {tool_name}:")
+            print(f"    - Function coverage: {function_coverage:.1f}% ({len(common_functions)}/{len(gcc_functions)})")
+            print(f"    - Call coverage: {call_coverage:.1f}% ({len(common_calls)}/{len(gcc_calls)})")
+        
+        return {
+            'gcc_functions': gcc_functions,
+            'gcc_calls': gcc_calls,
+            'coverage_results': coverage_results
+        }
+    
+    def _export_gcc_coverage_to_csv(self, coverage_analysis: Dict, output_prefix: str = "gcc_coverage"):
+        """Export GCC coverage analysis to CSV"""
+        if not coverage_analysis:
+            return
+            
+        coverage_results = coverage_analysis['coverage_results']
+        
+        # 1. Export coverage statistics
+        stats_data = []
+        for tool_name, results in coverage_results.items():
+            stats_data.append({
+                'Tool': tool_name,
+                'GCC Functions Found': results['gcc_functions_found'],
+                'Total GCC Functions': len(coverage_analysis['gcc_functions']),
+                'Function Coverage (%)': round(results['function_coverage'], 2),
+                'GCC Calls Found': results['gcc_calls_found'],
+                'Total GCC Calls': len(coverage_analysis['gcc_calls']),
+                'Call Coverage (%)': round(results['call_coverage'], 2),
+                'Tool Total Functions': results['tool_total_functions'],
+                'Tool Total Calls': results['tool_total_calls']
+            })
+        
+        stats_df = pd.DataFrame(stats_data)
+        stats_df.to_csv(f"result/{output_prefix}_statistics.csv", index=False, encoding='utf-8')
+        
+        # 2. Export detailed function coverage
+        gcc_functions = sorted(coverage_analysis['gcc_functions'])
+        func_coverage_data = []
+        
+        for func in gcc_functions:
+            row = {'Function Name': func, 'In GCC': 'Y'}
+            for tool_name, results in coverage_results.items():
+                row[tool_name] = 'Y' if func in results['common_functions'] else 'N'
+            func_coverage_data.append(row)
+        
+        func_coverage_df = pd.DataFrame(func_coverage_data)
+        func_coverage_df.to_csv(f"result/{output_prefix}_functions.csv", index=False, encoding='utf-8')
+        
+        # 3. Export detailed call coverage
+        gcc_calls = sorted(coverage_analysis['gcc_calls'])
+        call_coverage_data = []
+        
+        for caller, callee in gcc_calls:
+            row = {'Caller': caller, 'Callee': callee, 'In GCC': 'Y'}
+            for tool_name, results in coverage_results.items():
+                row[tool_name] = 'Y' if (caller, callee) in results['common_calls'] else 'N'
+            call_coverage_data.append(row)
+        
+        call_coverage_df = pd.DataFrame(call_coverage_data)
+        call_coverage_df.to_csv(f"result/{output_prefix}_calls.csv", index=False, encoding='utf-8')
+        
+        print(f"\nGCC coverage analysis exported to:")
+        print(f"  - result/{output_prefix}_statistics.csv (coverage statistics)")
+        print(f"  - result/{output_prefix}_functions.csv (function-level coverage)")
+        print(f"  - result/{output_prefix}_calls.csv (call-level coverage)")
+    
+    def _create_gcc_coverage_chart(self, coverage_analysis: Dict, output_prefix: str = "gcc_coverage"):
+        """Create GCC coverage comparison chart"""
+        if not coverage_analysis:
+            return
+            
+        coverage_results = coverage_analysis['coverage_results']
+        tools = list(coverage_results.keys())
+        
+        # Prepare data for visualization
+        function_coverages = [coverage_results[tool]['function_coverage'] for tool in tools]
+        call_coverages = [coverage_results[tool]['call_coverage'] for tool in tools]
+        
+        # Create chart
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # Colors for different tools (excluding GCC since it's the reference)
+        colors = ['#ff7f0e', '#9467bd', '#2ca02c', '#d62728', '#17becf']
+        bar_colors = [colors[i % len(colors)] for i in range(len(tools))]
+        
+        # Function coverage chart
+        bars1 = ax1.bar(tools, function_coverages, color=bar_colors)
+        ax1.set_title('Function Coverage vs GCC Reference', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('Coverage Percentage (%)')
+        ax1.set_xlabel('Analysis Tools')
+        ax1.set_ylim(0, 100)
+        
+        # Add percentage labels on bars
+        for bar, coverage in zip(bars1, function_coverages):
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2, height + 1,
+                    f'{coverage:.1f}%', ha='center', va='bottom', fontweight='bold')
+        
+        # Call coverage chart
+        bars2 = ax2.bar(tools, call_coverages, color=bar_colors)
+        ax2.set_title('Call Relationship Coverage vs GCC Reference', fontsize=14, fontweight='bold')
+        ax2.set_ylabel('Coverage Percentage (%)')
+        ax2.set_xlabel('Analysis Tools')
+        ax2.set_ylim(0, 100)
+        
+        # Add percentage labels on bars
+        for bar, coverage in zip(bars2, call_coverages):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2, height + 1,
+                    f'{coverage:.1f}%', ha='center', va='bottom', fontweight='bold')
+        
+        # Rotate x-axis labels if needed
+        ax1.tick_params(axis='x', rotation=45)
+        ax2.tick_params(axis='x', rotation=45)
+        
+        plt.tight_layout()
+        plt.savefig(f'result/{output_prefix}_comparison.png', dpi=300, bbox_inches='tight')
+        print(f"GCC coverage comparison chart saved as result/{output_prefix}_comparison.png")
 
 

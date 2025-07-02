@@ -31,6 +31,12 @@ def main():
         print("\nExporting comparison results to CSV files...")
         comparator.export_to_csv(comparison, "multi_callgraph_comparison")
         
+        print("\nPerforming GCC coverage analysis...")
+        gcc_coverage = comparator._perform_gcc_coverage_analysis(comparison)
+        if gcc_coverage:
+            comparator._export_gcc_coverage_to_csv(gcc_coverage, "gcc_coverage_analysis")
+            comparator._create_gcc_coverage_chart(gcc_coverage, "gcc_coverage_analysis")
+        
         print("\n✅ Analysis complete!")
         print("📁 Output files:")
         print("  - analysis_log.txt (complete log)")
@@ -38,13 +44,15 @@ def main():
         print("  - result/call_relationship_comparison.png (call relationship comparison)")
         print("  - result/graph_density_comparison.png (graph density comparison)")
         print("  - result/similarity_heatmap.png (similarity heatmap)")
-        print("  - result/multi_callgraph_comparison_*.csv (basic data)")
-        print("  - result/function_level_analysis_*.csv (high-level/low-level data)")
+        print("  - result/gcc_coverage_analysis_comparison.png (GCC coverage analysis)")
+        print("  - result/multi_callgraph_comparison_*.csv (basic comparison data)")
+        print("  - result/function_level_analysis_*.csv (high-level/low-level analysis)")
+        print("  - result/gcc_coverage_analysis_*.csv (GCC coverage analysis data)")
         
     except (FileNotFoundError, ValueError) as e:
         print(f"❌ Fatal error during analysis: {e}")
         print("Program cannot continue. Please check:")
-        print("  1. All required graph files exist (except angr_emul.dot)")
+        print("  1. All required graph files exist (except angr_emul.dot and gcc.dot which are optional)")
         print("  2. Graph files are valid and contain data")
         print("  3. File paths and permissions are correct")
         return 1  # Return error code
